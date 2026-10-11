@@ -1,0 +1,20 @@
+# Data files are too large for GitHub; they are rebuilt by the pipeline (see README)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+!data/processed/taxi_zones.geojson
+!data/processed/cleaning_summary.json
+data/*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
