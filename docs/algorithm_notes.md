@@ -1,42 +1,50 @@
 # Algorithm Notes — Chol Mach Kuol
 
-## 1. Top Routes (`get_top_routes`)
+## 1. top_k(items, k, key)
 
 **What it does:**
-Aggregate all trips by pickup borough and dropoff borough pair, counts how many trips
-occured on each pair, and returns the top N ranked by trip count.
+Returns the k largest items from a list ranked by a key function.
+Used in app.py to find the top routes and top destinations without sorting everything.
 
 **Approach:**
-- SQLite GROUP BY acts as a hash map aggregation — each unique (pu_borough, do_borough)
-  pair is a key, trip count is the value.
-- Results are sorted descending by trip count (ORDER BY ... DESC).
+Min-heap of size k. For each item, if it scores higher than the smallest item in the heap, replace it.
 
 **Time complexity:**
-- O(n) to scan all trips
-- O(k log k) to sort where k = unique borough pairs (NYC has 5 boroughs → max 25 pairs)
-- Overall: O(n) dominant
+- O(n log k) — much faster than O(n log n) full sort when k is small (e.g. top 10 from 63,000 routes)
 
 **Why this approach:**
-Borough-level grouping keeps k tiny (≤ 25), so sorting is essentially constant.
-A full zone-level approach would have k ≈ 63,000 pairs — borough level is the right granularity for a top-routes insight.
+Sorting all routes just to show the top 10 wastes time. A min-heap only tracks k items at once.
 
 ---
 
-## 2. Zone Detail (`get_zone_detail`)
+## 2. count_by(items)
 
 **What it does:**
-For a single zone ID, returns the zone metadata (name, borough) joined with aggregated
-trip stats — total trips, average fare, average speed — for trips that originated there.
+Counts how many times each value appears in a list. Returns a dict of {value: count}.
+Used in app.py to count how many trips went to each dropoff zone.
 
 **Approach:**
-- LEFT JOIN ensures zones with zero trips still return a result (total_trips = 0).
-- Single-row lookup on zone_id (primary key) + aggregation over matching trips.
+Single pass over the list, incrementing a dict counter for each value.
 
 **Time complexity:**
-- O(1) zone lookup (primary key index)
-- O(m) aggregation where m = trips from that zone
-- Overall: O(m)
+- O(n) — one pass, no sorting
 
 **Why this approach:**
-A zone detail view is always a single-zone query, so there's no need to pre-compute
-or cache — a direct indexed query is fast enough at this data scale.
+Simplest and fastest way to aggregate counts. Python's dict lookup is O(1) average.
+
+---
+
+## 3. quickselect_median(values)
+
+**What it does:**
+Finds the median fare for a zone without sorting the full list.
+Used in app.py for the zone detail panel — median is more robust than mean for skewed fares.
+
+**Approach:**
+Quickselect (partition-based selection). Picks a pivot, partitions the list, and recurses only on the half containing the target index.
+
+**Time complexity:**
+- O(n) average — avoids the O(n log n) cost of a full sort
+
+**Why this approach:**
+Fare distributions are skewed (outliers like $200 airport rides). Median gives a fairer "typical fare" than the mean. Quickselect gets it in O(n) instead of sorting first.
