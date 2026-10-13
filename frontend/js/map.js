@@ -1,206 +1,180 @@
 /**
- * map.js - the taxi zone map, drawn as SVG from the zone GeoJSON.
- *
- * Projection: at city scale the Earth is flat enough to use a simple
- * "equirectangular" projection. One degree of longitude is shorter than one
- * degree of latitude at New York's latitude (~40.7 N), so x is scaled by
- * cos(40.7 deg) to avoid a stretched-looking city.
- *
- * Zoom and pan work by changing the SVG viewBox (the visible window).
+ * map.js — Chol Mach Kuol
+ * SVG choropleth map of NYC taxi zones.
+ * No Leaflet — hand-drawn SVG using the GeoJSON polygons from the API.
  */
 
-import { BLUE_RAMP, hideTooltip, rampLegend, showTooltip } from "./charts.js";
-import { esc, fmt } from "./api.js";
+const RAMP = ["#e8f4fd", "#bdd7ee", "#6baed6", "#2171b5", "#08306b"];
 
-const SVG_NS = "http://www.w3.org/2000/svg";
-const LAT0 = 40.7;
-const KX = Math.cos((LAT0 * Math.PI) / 180);
-const SCALE = 1000;                     // degrees -> SVG units
-const MIN_RIDES_FOR_AVERAGES = 30;      // fewer rides = averages too noisy to colour
-
-const project = ([lon, lat]) => [(lon + 74.3) * KX * SCALE, (41.0 - lat) * SCALE];
-
-function ringToPath(ring) {
-  return ring.map((pt, i) => {
-    const [x, y] = project(pt);
-    return `${i ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join("") + "Z";
+function colorScale(value, min, max) {
+  if (value == null || max === min) return RAMP[0];
+  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const i = Math.min(Math.floor(t * (RAMP.length - 1)), RAMP.length - 2);
+  return RAMP[i];
 }
 
-function geometryToPath(geom) {
-  const polygons = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
-  return polygons.map((rings) => rings.map(ringToPath).join("")).join("");
+/** Project a GeoJSON [lng, lat] coordinate to SVG [x, y] given a bounding box. */
+function project([lng, lat], bbox, W, H, pad) {
+  const x = pad + ((lng - bbox.minX) / (bbox.maxX - bbox.minX)) * (W - 2 * pad);
+  const y = pad + ((bbox.maxY - lat) / (bbox.maxY - bbox.minY)) * (H - 2 * pad);
+  return [x, y];
 }
 
-export const METRICS = {
-  trips: { label: "Pickups", format: fmt.compact, needsVolume: false },
-  avg_speed_mph: { label: "Average speed (mph)", format: (v) => v.toFixed(1), needsVolume: true },
-  fare_per_mile: { label: "Fare per mile", format: fmt.money, needsVolume: true },
-  avg_fare: { label: "Average fare", format: fmt.money0, needsVolume: true },
-  avg_tip_pct: { label: "Card tip %", format: (v) => `${v.toFixed(0)}%`, needsVolume: true },
-};
+function getBBox(geojson) {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const f of geojson.features) {
+    const rings = f.geometry.type === "Polygon"
+      ? f.geometry.coordinates
+      : f.geometry.coordinates.flat();
+    for (const ring of rings) {
+      for (const [lng, lat] of ring) {
+        if (lng < minX) minX = lng; if (lng > maxX) maxX = lng;
+        if (lat < minY) minY = lat; if (lat > maxY) maxY = lat;
+      }
+    }
+  }
+  return { minX, maxX, minY, maxY };
+}
 
-export function createZoneMap(container, legendEl, geojson, { onSelect }) {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("aria-hidden", "true");
-  const layer = document.createElementNS(SVG_NS, "g");
-  svg.appendChild(layer);
-  container.appendChild(svg);
+function toPath(geometry, bbox, W, H, pad) {
+  const rings = geometry.type === "Polygon"
+    ? geometry.coordinates
+    : geometry.coordinates.flat();
+  return rings.map(ring =>
+    ring.map((coord, i) => {
+      const [x, y] = project(coord, bbox, W, H, pad);
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ") + " Z"
+  ).join(" ");
+}
 
-  const paths = new Map();          // zone_id -> <path>
-  const names = new Map();          // zone_id -> {zone, borough}
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+/**
+ * createZoneMap(el, legendEl, geojson, { onSelect })
+ * Returns { update, setSelected, zoomIn, zoomOut, reset, escName }
+ */
+export function createZoneMap(el, legendEl, geojson, { onSelect } = {}) {
+  if (!el || !geojson?.features?.length) return null;
+
+  const W = el.clientWidth || 560;
+  const H = el.clientHeight || 480;
+  const PAD = 12;
+
+  const bbox = getBBox(geojson);
+  let zoomLevel = 1;
+  let selectedId = null;
+  let currentStats = [];
+  let currentMetric = "trips";
+
+  // Build path elements once
+  const paths = new Map();   // zone_id -> <path>
+  const names = new Map();   // zone_id -> zone_name
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "100%");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.style.cursor = "pointer";
+
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  svg.appendChild(g);
+
+  const tip = document.getElementById("tooltip");
 
   for (const f of geojson.features) {
-    const p = document.createElementNS(SVG_NS, "path");
-    p.setAttribute("d", geometryToPath(f.geometry));
-    p.setAttribute("class", "zone");
-    p.setAttribute("fill-rule", "evenodd");
-    p.dataset.zone = f.properties.zone_id;
-    layer.appendChild(p);
-    paths.set(f.properties.zone_id, p);
-    names.set(f.properties.zone_id, f.properties);
+    const { zone_id, zone, borough } = f.properties;
+    names.set(zone_id, zone);
+    const d = toPath(f.geometry, bbox, W, H, PAD);
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", RAMP[0]);
+    path.setAttribute("stroke", "var(--bg, #fff)");
+    path.setAttribute("stroke-width", "0.4");
+    path.dataset.id = zone_id;
+    path.dataset.zone = zone;
+    path.dataset.borough = borough;
 
-    const polygons = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
-    for (const rings of polygons) for (const pt of rings[0]) {
-      const [x, y] = project(pt);
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  }
-
-  /* ---------------- zoom & pan via the viewBox ---------------- */
-  const pad = 10;
-  const home = { x: minX - pad, y: minY - pad, w: maxX - minX + 2 * pad, h: maxY - minY + 2 * pad };
-  let view = { ...home };
-  const apply = () => svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
-  apply();
-
-  function zoomAt(factor, cx = view.x + view.w / 2, cy = view.y + view.h / 2) {
-    const w = Math.min(home.w * 1.5, Math.max(home.w / 25, view.w * factor));
-    const h = (w / view.w) * view.h;
-    view = { x: cx - ((cx - view.x) / view.w) * w, y: cy - ((cy - view.y) / view.h) * h, w, h };
-    apply();
-  }
-
-  function toSvgPoint(clientX, clientY) {
-    const box = svg.getBoundingClientRect();
-    // preserveAspectRatio "xMidYMid meet": work out the rendered scale
-    const scale = Math.min(box.width / view.w, box.height / view.h);
-    const offX = (box.width - view.w * scale) / 2;
-    const offY = (box.height - view.h * scale) / 2;
-    return { x: view.x + (clientX - box.left - offX) / scale, y: view.y + (clientY - box.top - offY) / scale, scale };
-  }
-
-  svg.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const pt = toSvgPoint(e.clientX, e.clientY);
-    zoomAt(e.deltaY > 0 ? 1.2 : 1 / 1.2, pt.x, pt.y);
-  }, { passive: false });
-
-  let drag = null;
-  svg.addEventListener("pointerdown", (e) => {
-    drag = { x: e.clientX, y: e.clientY, view: { ...view }, moved: false };
-  });
-  window.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const dx = e.clientX - drag.x;
-    const dy = e.clientY - drag.y;
-    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
-    if (!drag.moved) {
-      drag.moved = true;
-      container.classList.add("dragging");
-      hideTooltip();
-    }
-    const { scale } = toSvgPoint(e.clientX, e.clientY);
-    view = { ...drag.view, x: drag.view.x - dx / scale, y: drag.view.y - dy / scale };
-    apply();
-  });
-  window.addEventListener("pointerup", () => {
-    if (drag?.moved) {
-      // Swallow the click that follows a drag so panning never selects a zone.
-      svg.addEventListener("click", (ev) => ev.stopPropagation(), { capture: true, once: true });
-    }
-    drag = null;
-    container.classList.remove("dragging");
-  });
-
-  /* ---------------- hover & click ---------------- */
-  let values = new Map();
-  let metric = "trips";
-
-  layer.addEventListener("pointermove", (e) => {
-    if (drag?.moved) return;
-    const id = Number(e.target.dataset.zone);
-    if (!id) return;
-    const info = names.get(id);
-    const row = values.get(id);
-    const m = METRICS[metric];
-    const rows = [["Pickups", fmt.int(row?.trips ?? 0)]];
-    if (metric !== "trips") {
-      const v = row?.[metric];
-      rows.push([m.label, v != null && row.trips >= MIN_RIDES_FOR_AVERAGES ? m.format(v) : "too few rides"]);
-    }
-    showTooltip(e.clientX, e.clientY, `${info.zone} · ${info.borough}`, rows);
-  });
-  layer.addEventListener("pointerleave", hideTooltip);
-  layer.addEventListener("click", (e) => {
-    const id = Number(e.target.dataset.zone);
-    if (id) onSelect(id);
-  });
-
-  /* ---------------- public API ---------------- */
-  return {
-    zoomIn: () => zoomAt(1 / 1.5),
-    zoomOut: () => zoomAt(1.5),
-    reset: () => { view = { ...home }; apply(); },
-
-    /**
-     * Colour every zone. Uses QUANTILE classes: each colour step holds about
-     * the same number of zones. Pickups are extremely skewed (Midtown has
-     * thousands of times more than most of Queens), so equal-width steps
-     * would paint almost every zone the lightest colour.
-     */
-    update(rows, newMetric) {
-      metric = newMetric;
-      values = new Map(rows.map((r) => [r.zone_id, r]));
-      const m = METRICS[metric];
-      const usable = rows.filter((r) => r[metric] != null && (!m.needsVolume || r.trips >= MIN_RIDES_FOR_AVERAGES));
-      const sorted = usable.map((r) => r[metric]).sort((a, b) => a - b);
-      const k = BLUE_RAMP.length;
-      const breaks = [];
-      for (let i = 1; i < k; i++) breaks.push(sorted[Math.floor((i / k) * (sorted.length - 1))]);
-      const classOf = (v) => {
-        let c = 0;
-        while (c < breaks.length && v > breaks[c]) c++;
-        return c;
-      };
-      const usableIds = new Set(usable.map((r) => r.zone_id));
-
-      for (const [id, path] of paths) {
-        const r = values.get(id);
-        path.setAttribute("fill", usableIds.has(id) ? BLUE_RAMP[classOf(r[metric])] : "var(--no-data)");
+    path.addEventListener("mouseenter", (e) => {
+      if (tip) {
+        const stat = currentStats.find(s => s.zone_id === zone_id);
+        tip.hidden = false;
+        tip.innerHTML = `<strong>${zone}</strong><div class="tip-row"><span>${borough}</span></div>` +
+          (stat ? `<div class="tip-row"><span>Pickups</span><span>${stat.trips?.toLocaleString() ?? "–"}</span></div>
+                   <div class="tip-row"><span>Avg speed</span><span>${stat.avg_speed_mph != null ? stat.avg_speed_mph.toFixed(1) + " mph" : "–"}</span></div>
+                   <div class="tip-row"><span>Avg fare</span><span>${stat.avg_fare != null ? "$" + stat.avg_fare.toFixed(2) : "–"}</span></div>` : "");
       }
-      rampLegend(legendEl, {
-        title: m.label,
-        ramp: BLUE_RAMP,
-        minLabel: sorted.length ? m.format(sorted[0]) : "–",
-        maxLabel: sorted.length ? m.format(sorted[sorted.length - 1]) : "–",
-        noData: m.needsVolume ? `Fewer than ${MIN_RIDES_FOR_AVERAGES} rides` : "No pickups",
-      });
-    },
+      if (zone_id !== selectedId) path.setAttribute("stroke-width", "1.5");
+    });
+    path.addEventListener("mousemove", (e) => {
+      if (!tip) return;
+      tip.style.left = `${Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8)}px`;
+      tip.style.top  = `${Math.max(e.clientY - 28, 4)}px`;
+    });
+    path.addEventListener("mouseleave", () => {
+      if (tip) tip.hidden = true;
+      if (zone_id !== selectedId) path.setAttribute("stroke-width", "0.4");
+    });
+    path.addEventListener("click", () => {
+      onSelect?.(zone_id);
+    });
 
-    setSelected(zoneId) {
-      for (const [id, path] of paths) {
-        const on = id === zoneId;
-        path.classList.toggle("selected", on);
-        if (on) layer.appendChild(path);   // bring to front so the outline is not hidden
-      }
-    },
+    g.appendChild(path);
+    paths.set(zone_id, path);
+  }
 
-    zoneName: (id) => names.get(id)?.zone,
-    escName: (id) => esc(names.get(id)?.zone ?? `Zone ${id}`),
-  };
+  el.appendChild(svg);
+
+  function drawLegend(min, max) {
+    if (!legendEl) return;
+    legendEl.innerHTML = `
+      <span class="legend-label">${min.toLocaleString()}</span>
+      <span class="legend-swatch" style="background:linear-gradient(to right,${RAMP.join(",")})"></span>
+      <span class="legend-label">${max.toLocaleString()}</span>`;
+  }
+
+  function update(stats, metric = "trips") {
+    currentStats = stats;
+    currentMetric = metric;
+    const vals = stats.map(s => s[metric]).filter(v => v != null);
+    if (!vals.length) return;
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    for (const s of stats) {
+      const path = paths.get(s.zone_id);
+      if (!path) continue;
+      const fill = colorScale(s[metric], min, max);
+      path.setAttribute("fill", fill);
+    }
+    drawLegend(Math.round(min), Math.round(max));
+  }
+
+  function setSelected(zoneId) {
+    // Reset previous
+    if (selectedId != null) {
+      const prev = paths.get(selectedId);
+      if (prev) { prev.setAttribute("stroke", "var(--bg, #fff)"); prev.setAttribute("stroke-width", "0.4"); }
+    }
+    selectedId = zoneId;
+    if (zoneId != null) {
+      const cur = paths.get(zoneId);
+      if (cur) { cur.setAttribute("stroke", "var(--accent, #e6550d)"); cur.setAttribute("stroke-width", "2"); }
+    }
+  }
+
+  function zoomIn()  { zoomLevel = Math.min(zoomLevel * 1.4, 8); applyZoom(); }
+  function zoomOut() { zoomLevel = Math.max(zoomLevel / 1.4, 1); applyZoom(); }
+  function reset()   { zoomLevel = 1; applyZoom(); }
+
+  function applyZoom() {
+    const cx = W / 2, cy = H / 2;
+    const tx = cx - zoomLevel * cx;
+    const ty = cy - zoomLevel * cy;
+    g.setAttribute("transform", `translate(${tx},${ty}) scale(${zoomLevel})`);
+  }
+
+  function escName(zoneId) {
+    const n = names.get(zoneId) ?? String(zoneId);
+    return n.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+  }
+
+  return { update, setSelected, zoomIn, zoomOut, reset, escName };
 }
