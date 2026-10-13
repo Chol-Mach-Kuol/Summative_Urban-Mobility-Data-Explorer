@@ -64,10 +64,10 @@ def apply_exclusion_rules(df):
     for name,mask in rules:
         reason=reason.mask(reason.isna() & mask.fillna(False),name)
     excluded=df[reason.notna()].copy()
-    excluded=insert(1,'exclusion_reason',reason[reason.notna()])
+    excluded.insert(1,'exclusion_reason',reason[reason.notna()])
     kept=df[reason.isna()].copy()
     counts = {name: int((reason == name).sum()) for name, _ in rules}
-    return kept,exluded,counts
+    return kept,excluded,counts
 
 def repair_and_normalize(df,lookup):
     notes=pd.Series('',index=df.index,dtype='string')
@@ -77,12 +77,12 @@ def repair_and_normalize(df,lookup):
     df['congestion_surcharge']=df['congestion_surcharge'].fillna(0.0)
     zero_pax=df['passenger_count']==0
     note(zero_pax,'passenger_count_0_set_unknown')
-    df['passenger_count']=df['passenger_copunt'].astype("Int64").mask(zero_pax)
+    df['passenger_count']=df['passenger_count'].astype("Int64").mask(zero_pax)
     no_meta=df['RatecodeID'].isna()
     note(no_meta,'trip_metadata_missing')
     
     bad_rate=df['RatecodeID'].notna() & ~df["RatecodeID"].isin(VALID_RATECODES)
-    note((bad_rate, "invalid_ratecode_set_unknown"))
+    note(bad_rate, "invalid_ratecode_set_unknown")
     df["RatecodeID"] = df["RatecodeID"].astype("Int64").mask(bad_rate)
     
     bad_payment=~df['payment_type'].isin(VALID_PAYMENT_TYPES)
@@ -98,7 +98,7 @@ def repair_and_normalize(df,lookup):
     
     valid_zone_ids=set(lookup['LocationID'])
     bad_zone=~df["PULocationID"].isin(valid_zone_ids) | ~df["DOLocationID"].isin(valid_zone_ids)
-    if bad_zone_any():
+    if bad_zone.any():
         raise ValueError(f"{int(bad_zone.sum())} rides reference zones missing from the lookup")
     
     for col in MONEY_COLS:
@@ -118,7 +118,7 @@ def repair_and_normalize(df,lookup):
         "payment_type": "payment_type_id",
     })
     
-    uspicious = df.loc[notes != "", ["source_row", "pickup_datetime", "vendor_id",
+    suspicious = df.loc[notes != "", ["source_row", "pickup_datetime", "vendor_id",
                                       "pickup_zone_id", "dropoff_zone_id",
                                       "fare_amount", "total_amount"]].copy()
     suspicious.insert(1, "issues", notes[notes != ""])
