@@ -19,7 +19,7 @@ with open(src, "r", encoding="utf-8", newline="") as fin, \
     for line in fin:
         total+=1
         if random.random() < fraction:
-            four.write(line)
+            fout.write(line)
             kept+=1
         if total % 500_000==0:
            print(f"  read {total:,} rows...") 
