@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NYC Taxi Mobility</title>
+  <meta name="description" content="An interactivelook at every yellow taxi ride in New York City in January 2019: where rides start, when the city slows down, and what it costs.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    /* Apply a saved light/dark chice before the paint (see js/theme.js). */
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+    } catch (e) { /* storage blocked: follow the system theme */ }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to the dashboard</a>
+
+  <header class="masthead">
+    <button type="button" class="btn-ghost theme-toggle" id="theme-toggle" aria-pressed="false">
+      <span class="theme-icon" aria-hidden="true">☾</span> <span class="theme-label">Dark</span>
+    </button>
+    <dive class="masthead-text">
+      <h1>How New York moves by yellow cab</h1>
+      <p class="lede">Every yellow taxi ride in january 2019, cleaned, mapped, timed and priced.
+        change any filter and the whole page answer the new question.</p>
+      </div>
+
+    <section class="meter" aria-labelledby="meter-title" aria-live="polite">
+      <h2 id="meter-title" class="visually-hidden">Totals for the current filters</h2>
+      <div class="meter-main">
+        <span class="meter-value" id="m-trips">–</span>
+        <span class="meter-label">rides</span>
+      </div>
+      <dl class="meter-grid">
+        <div><dt>Average fare</dt><dd id="m-fare">–</dd></div>
+        <div><dt>Average speed</dt><dd id="m-speed">–</dd></div>
+        <div><dt>Fare per mile</dt><dd id="m-fpm">–</dd></div>
+        <div><dt>Card tip</dt><dd id="m-tip">–</dd></div>
+      </d1>
+      <p class="meter-foot" id="m-source">loading…</p>
+    </section>
+  </header>
+
+  <form class="filters" id="filters" aria-label="Filters">
+    <div class="filter-row">
+      <label class="field">
+        <span>From</span>
+        <input type="date" name="start_date" id="f-start">
+      </label>
+      <label class="field">
+        <span>To</span>
+        <input type="date" name="end_date" id="f-end">
+      </label>
+      <label class="field">
+        <span>Borough</span>
+        <select name="borough_id" id="f-borough"><option value="">All boroughs</option></select>
+      </label>
+      <label class="field field-wide">
+        <span>Pickup zone</span>
+        <select name="zone_id" id="f-zone"><option value="">All zones</option></select>
+      </label>
+      <label class="field">
+        <span>Day</span>
+        <select name="dow" id="f-dow">
+          <option value="">Every day</option>
+          <option value="0">Monday</option><option value="1">Tuesday</option>
+          <option value="2">Wednesday</option><option value="3">Thursday</option>
+          <option value="4">Friday</option><option value="5">Saturday</option>
+          <option value="6">Sunday</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Hours</span>
+        <span class="pair">
+          <select name="hour_min" id="f-hmin" aria-label="From hour"></select>
+          <select name="hour_max" id="f-hmax" aria-label="To hour"></select>
+        </span>
+      </label>
+      <div class="filter-actions">
+        <button type="button" class="btn-ghost" id="more-toggle" aria-expanded="false" aria-controls="more-filters">More filters</button>
+        <button type="reset" class="btn-ghost" id="reset">Reset</button>
+      </div>
+    </div>
+
+    <div class="filter-row more" id="more-filters" hidden>
+      <label class="field">
+        <span>Distance (mi)</span>
+        <span class="pair">
+          <input type="number" name="min_distance" min="0" max="100" step="0.5" placeholder="min" aria-label="Minimum distance in miles">
+          <input type="number" name="max_distance" min="0" max="100" step="0.5" placeholder="max" aria-label="Maximum distance in miles">
+        </span>
+      </label>
+      <label class="field">
+        <span>Fare ($)</span>
+        <span class="pair">
+          <input type="number" name="min_fare" min="0" max="500" step="1" placeholder="min" aria-label="Minimum fare in dollars">
+          <input type="number" name="max_fare" min="0" max="500" step="1" placeholder="max" aria-label="Maximum fare in dollars">
+        </span>
+      </label>
+      <label class="field">
+        <span>Payment</span>
+        <select name="payment_type_id" id="f-payment"><option value="">Any payment</option></select>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="airport_only" value="1">
+        <span>Airport trips only</span>
+      </label>
+      <p class="filter-note">These filters read the full 7.5&nbsp;million-row table, so they take a moment longer.</p>
+    </div>
+  </form>
+
+  <main id="main">
+
+    <!-- Map ---------------------------------------------------------------->
+    <section class="panel" id="map-section" aria-labelledby="map-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="map-title">Nine in ten rides start in Manhattan</h2>
+          <p class="panel-sub">Each of New York's 263 taxi zones, shaded by where rides begin. Click a zone to see where its riders go.</p>
+        </div>
+        <label class="field compact">
+          <span>Shade zones by</span>
+          <select id="map-metric">
+            <option value="trips">Number of pickups</option>
+            <option value="avg_speed_mph">Average speed</option>
+            <option value="fare_per_mile">Fare per mile</option>
+            <option value="avg_fare">Average fare</option>
+            <option value="avg_tip_pct">Card tip %</option>
+          </select>
+        </label>
+      </div>
+      <div class="map-layout">
+        <div class="map-wrap">
+          <div id="map" class="map" role="img" aria-label="Map of New York City taxi zones"></div>
+          <div class="map-controls">
+            <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+            <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+            <button type="button" id="zoom-reset" aria-label="Show the whole city">Fit</button>
+          </div>
+          <div id="map-legend" class="legend"></div>
+        </div>
+        <aside class="zone-panel" id="zone-panel" aria-live="polite">
+          <p class="zone-empty">Pick a zone on the map, or choose one in the “Pickup zone” filter, to see its riders’ top destinations and typical fare.</p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Speed vs cost ------------------------------------------------------->
+    <section class="panel" id="speed-section" aria-labelledby="speed-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="speed-title">The slower the city, the more each mile costs</h2>
+          <p class="panel-sub" id="speed-sub">Taxis average about 23&nbsp;mph at 5&nbsp;am but crawl near 11&nbsp;mph from 8&nbsp;am to 6&nbsp;pm.
+            Because the meter also charges for time stuck in traffic, the price of a mile climbs as speed falls.</p>
+        </div>
+      </div>
+      <div class="twin-charts">
+        <figure>
+          <figcaption>Average speed by hour of pickup (mph)</figcaption>
+          <div class="chart" id="chart-speed"></div>
+        </figure>
+        <figure>
+          <figcaption>Fare per mile by hour of pickup ($)</figcaption>
+          <div class="chart" id="chart-fpm"></div>
+        </figure>
+      </div>
+    </section>
+
+    <!-- Weekly rhythm ------------------------------------------------------->
+    <section class="panel" id="rhythm-section" aria-labelledby="rhythm-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="rhythm-title">Thursday and Friday evenings are the city’s peak</h2>
+          <p class="panel-sub">Rides on an average day, by weekday and hour. Weekday mornings are busy but slow;
+            the true peak comes between 6 and 8&nbsp;pm late in the week.</p>
+        </div>
+        <div class="segmented" role="radiogroup" aria-label="Heatmap measure">
+          <button type="button" role="radio" aria-checked="true" data-metric="trips_per_day">Rides</button>
+          <button type="button" role="radio" aria-checked="false" data-metric="avg_speed_mph">Speed</button>
+        </div>
+      </div>
+      <div id="heatmap" class="heatmap"></div>
+      <div id="heatmap-legend" class="legend legend-inline"></div>
+
+      <h3 class="sub-title">Rides per day across January</h3>
+      <p class="panel-sub">Holidays and Sundays run lighter and faster; demand builds as the city returns to work after New Year.</p>
+      <div class="chart" id="chart-daily"></div>
+    </section>
+
+    <!-- Routes -------------------------------------------------------------->
+    <section class="panel" id="routes-section" aria-labelledby="routes-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="routes-title">The busiest routes are short hops on the Upper East Side</h2>
+          <p class="panel-sub" id="routes-sub">The most travelled pickup → drop-off pairs. Ranked with a hand-written min-heap (top-K) over every route in the current filter.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="routes-table">
+          <thead>
+            <tr>
+              <th scope="col" class="num">#</th>
+              <th scope="col">From</th>
+              <th scope="col">To</th>
+              <th scope="col" class="num">Rides</th>
+              <th scope="col" class="num">Avg distance</th>
+              <th scope="col" class="num">Avg time</th>
+              <th scope="col" class="num">Speed</th>
+              <th scope="col" class="num">Avg fare</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Trip explorer ------------------------------------------------------->
+    <section class="panel" id="trips-section" aria-labelledby="trips-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="trips-title">Look up individual rides</h2>
+          <p class="panel-sub">The rides behind the numbers, using the filters above. Sort by a column heading; open a row for the full record.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="trips-table">
+          <thead>
+            <tr>
+              <th scope="col"><button type="button" class="sort" data-sort="pickup_datetime">Pickup time</button></th>
+              <th scope="col">From</th>
+              <th scope="col">To</th>
+              <th scope="col" class="num"><button type="button" class="sort" data-sort="trip_distance">Distance</button></th>
+              <th scope="col" class="num"><button type="button" class="sort" data-sort="trip_duration_min">Time</button></th>
+              <th scope="col" class="num"><button type="button" class="sort" data-sort="avg_speed_mph">Speed</button></th>
+              <th scope="col" class="num"><button type="button" class="sort" data-sort="fare_amount">Fare</button></th>
+              <th scope="col" class="num"><button type="button" class="sort" data-sort="tip_pct">Tip</button></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <nav class="pager" aria-label="Trip pages">
+        <button type="button" class="btn-ghost" id="prev-page">Previous</button>
+        <span id="page-label">Page 1</span>
+        <button type="button" class="btn-ghost" id="next-page">Next</button>
+      </nav>
+    </section>
+
+    <!-- Data quality -------------------------------------------------------->
+    <section class="panel" id="quality-section" aria-labelledby="quality-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="quality-title">What we removed, and why</h2>
+          <p class="panel-sub" id="quality-sub"></p>
+        </div>
+      </div>
+      <div class="quality-layout">
+        <div>
+          <h3 class="sub-title">Rides excluded</h3>
+          <div id="quality-excluded" class="hbars"></div>
+        </div>
+        <div>
+          <h3 class="sub-title">Rides kept but repaired or flagged</h3>
+          <div id="quality-flagged" class="hbars"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Data: NYC Taxi &amp; Limousine Commission, Yellow Taxi Trip Records, January 2019, and Taxi Zone shapefile.
+      Built with Flask, SQLite and hand-drawn SVG.</p>
+  </footer>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
