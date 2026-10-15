@@ -6,18 +6,53 @@ Hand-written algorithms used by app.py for ranking and statistics.
 
 def top_k(items, k, key):
     """
-    Return the k largest items by key using a min-heap.
+    Return the k largest items by key using a hand-written min-heap.
     Time complexity: O(n log k)  —  faster than sorting all n items when k << n.
+    Space complexity: O(k)  —  heap never grows beyond k entries.
     """
-    import heapq
-    heap = []
-    for i, item in enumerate(items):
+    heap = []   # list of (val, tiebreak, item), maintained as a min-heap
+
+    def _sift_up(h, i):
+        while i > 0:
+            parent = (i - 1) // 2
+            if h[i][0] < h[parent][0]:
+                h[i], h[parent] = h[parent], h[i]
+                i = parent
+            else:
+                break
+
+    def _sift_down(h, i):
+        n = len(h)
+        while True:
+            smallest, left, right = i, 2 * i + 1, 2 * i + 2
+            if left < n and h[left][0] < h[smallest][0]:
+                smallest = left
+            if right < n and h[right][0] < h[smallest][0]:
+                smallest = right
+            if smallest == i:
+                break
+            h[i], h[smallest] = h[smallest], h[i]
+            i = smallest
+
+    for tiebreak, item in enumerate(items):
         val = key(item)
         if len(heap) < k:
-            heapq.heappush(heap, (val, i, item))
+            heap.append((val, tiebreak, item))
+            _sift_up(heap, len(heap) - 1)
         elif val > heap[0][0]:
-            heapq.heapreplace(heap, (val, i, item))
-    return [item for _, _, item in sorted(heap, key=lambda x: x[0], reverse=True)]
+            heap[0] = (val, tiebreak, item)
+            _sift_down(heap, 0)
+
+    # sort descending by val to return ranked results
+    result = []
+    while heap:
+        # pop min, swap root with last element then sift down
+        heap[0], heap[-1] = heap[-1], heap[0]
+        result.append(heap.pop()[2])
+        if heap:
+            _sift_down(heap, 0)
+    result.reverse()
+    return result
 
 
 def count_by(items):
