@@ -10,29 +10,34 @@ A full-stack dashboard for exploring NYC Yellow Taxi trip patterns — built wit
 
 ```
 ├── backend/
-│   ├── app.py                  # Flask entry point
-│   └── routes/
-│       ├── trips.py            # GET /api/trips/
-│       ├── zones.py            # GET /api/zones/, /api/zones/geojson
-│       └── insights.py         # GET /api/insights/*
+│   ├── app.py                  # Flask entry point + all API endpoints
+│   ├── algorithms.py           # Hand-written top_k, count_by, quickselect_median
+│   └── db.py                   # SQLite connection, filter parsing, WHERE builder
 ├── database/
-│   ├── schema.sql              # Normalized schema + indexes
-│   └── db.py                   # SQLite connection helper
+│   ├── schema.sql              # Star schema + CHECK constraints
+│   ├── indexes.sql             # Performance indexes
+│   └── load_database.py        # Bulk insert + summary table builder
 ├── pipeline/
-│   ├── clean.py                # Data cleaning + feature engineering
-│   └── load.py                 # Insert cleaned data into DB
+│   ├── clean_data.py           # Data cleaning + feature engineering
+│   ├── trips_io.py             # CSV/Parquet read helpers
+│   ├── convert_zones.py        # Shapefile → GeoJSON conversion
+│   ├── make_sample.py          # Creates a smaller sample dataset
+│   └── profile_data.py         # Data profiling / EDA
 ├── frontend/
 │   ├── index.html              # Dashboard shell
 │   ├── css/style.css
 │   └── js/
 │       ├── api.js              # Fetch helpers
-│       ├── charts.js           # Chart.js + Leaflet renders
-│       ├── table.js            # Paginated trip table + KPIs
-│       └── main.js             # Filter wiring + bootstrap
+│       ├── charts.js           # Chart.js renders
+│       ├── map.js              # Leaflet choropleth map
+│       ├── main.js             # Filter wiring + bootstrap
+│       └── theme.js            # Dark/light mode toggle
 ├── data/
 │   ├── raw/                    # Place source files here (git-ignored)
 │   └── processed/              # Output of pipeline (git-ignored)
-├── docs/screenshots/
+├── docs/
+│   ├── screenshots/            # Architecture diagram + insight screenshots
+│   └── NYC_Urban_Mobility_Documentation_Report.pdf
 ├── codevibe-reports/           # One .report.json per team member
 ├── requirements.txt
 └── README.md
@@ -46,8 +51,8 @@ A full-stack dashboard for exploring NYC Yellow Taxi trip patterns — built wit
 
 ```bash
 git clone <your-team-repository-url>
-cd Summative_Urban-Mobility-Data-Explorer
-python -m venv .venv
+cd Summative_Urban-Mobility-Data-Explorer-1
+python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -58,32 +63,25 @@ Place the following files in `data/raw/`:
 
 | File | Source |
 |------|--------|
-| `yellow_tripdata_*.parquet` | [TLC Trip Records](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) |
+| `yellow_tripdata_2019-01.csv` | [TLC Trip Records](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) |
 | `taxi_zone_lookup.csv` | Provided in assignment |
-| `taxi_zones.geojson` | Provided in assignment (rename if needed) |
+| `taxi_zones.shp` (+ sidecar files) | Provided in assignment |
 
 ### 3. Run the data pipeline
 
 ```bash
-python pipeline/clean.py   # cleans + engineers features → data/processed/
-python pipeline/load.py    # loads processed data into database/mobility.db
+python3 pipeline/clean_data.py   # cleans + engineers features → data/processed/
+python3 database/load_database.py  # loads processed data into data/mobility.db
 ```
 
 ### 4. Start the backend
 
 ```bash
-python backend/app.py
-# API available at http://localhost:5000
+python3 backend/app.py
+# API + dashboard available at http://127.0.0.1:5000
 ```
 
-### 5. Open the frontend
-
-Open `frontend/index.html` directly in your browser, **or** serve it with:
-
-```bash
-python -m http.server 8080 --directory frontend
-# Dashboard at http://localhost:8080
-```
+The backend also serves the frontend, so no separate step is needed. Open `http://127.0.0.1:5000` in your browser.
 
 ---
 
@@ -91,17 +89,22 @@ python -m http.server 8080 --directory frontend
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/trips/` | Paginated trips with filters |
-| GET | `/api/zones/` | All taxi zones |
+| GET | `/api/health` | DB status + total trip count |
+| GET | `/api/meta` | Date range, boroughs, zones, payment types |
+| GET | `/api/summary` | KPI headline numbers for current filters |
+| GET | `/api/by-hour` | Trips and speed per hour of day (0–23) |
+| GET | `/api/by-day` | Daily totals (time series) |
+| GET | `/api/heatmap` | Weekday × hour grid (demand + speed) |
+| GET | `/api/zone-stats` | Per-zone pickup stats (colours the map) |
 | GET | `/api/zones/geojson` | Zone GeoJSON boundaries |
-| GET | `/api/insights/hourly-demand` | Trips per hour of day |
-| GET | `/api/insights/top-routes` | Top borough-to-borough routes |
-| GET | `/api/insights/fare-vs-distance` | Sampled fare vs distance |
-| GET | `/api/insights/borough-summary` | Avg speed/fare/duration by borough |
+| GET | `/api/top-routes` | Top K pickup → dropoff zone pairs |
+| GET | `/api/zones/<zone_id>` | Detail view for one zone |
+| GET | `/api/trips` | Sortable, filterable, paginated trip list |
+| GET | `/api/data-quality` | Cleaning summary + exclusion breakdown |
 
-### Trip filter params
+### Filter params (accepted by most endpoints)
 
-`date_from`, `date_to`, `pu_location_id`, `do_location_id`, `min_distance`, `max_distance`, `min_fare`, `max_fare`, `payment_type`, `limit` (max 500), `offset`
+`start_date`, `end_date` (YYYY-MM-DD), `borough_id`, `zone_id`, `dow` (0=Mon–6=Sun), `hour_min`, `hour_max`, `min_distance`, `max_distance`, `min_fare`, `max_fare`, `payment_type_id`, `airport_only`
 
 ---
 
@@ -109,9 +112,22 @@ python -m http.server 8080 --directory frontend
 
 | Feature | Formula | Insight |
 |---------|---------|---------|
-| `trip_duration_min` | `(dropoff − pickup) / 60s` | Proxy for congestion |
-| `speed_mph` | `distance / (duration / 60)` | Flags anomalous trips |
+| `trip_duration_min` | `(dropoff − pickup) / 60` | Proxy for congestion |
+| `avg_speed_mph` | `distance / (duration / 60)` | Flags anomalous trips |
 | `fare_per_mile` | `fare_amount / trip_distance` | Economic efficiency |
+| `tip_pct` | `tip_amount / fare_amount × 100` | Tipping behaviour |
+
+---
+
+## Dataset
+
+| Metric | Value |
+|--------|-------|
+| Raw rows | 7,667,792 |
+| Clean rows | 7,578,890 |
+| Excluded rows | 88,902 (1.16%) |
+| Database size | 2.6 GB |
+| Coverage | January 2019, NYC Yellow Taxi |
 
 ---
 
