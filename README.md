@@ -135,10 +135,10 @@ The backend also serves the frontend, so no separate step is needed. Open `http:
 
 | Name | Role | GitHub |
 |------|------|--------|
-| _Member 1_ | Backend / Pipeline | @username |
-| _Member 2_ | Database / Schema | @username |
-| _Member 3_ | Frontend / Charts | @username |
-| _Member 4_ | DSA / Insights | @username |
+| Chol Mach | Team Lead & Algorithms Engineer | Chol-Mach-Kuol |
+| Alier Piel | Developer & Database Designer | apiel-max |
+| Abay Tessema | Data Engineer (pipeline & ETL) | Abay-Wizard |
+| Kuol Akech | Frontend Developer | k-kuol |
 
 ---
 
