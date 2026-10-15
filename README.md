@@ -50,7 +50,7 @@ A full-stack dashboard for exploring NYC Yellow Taxi trip patterns — built wit
 ### 1. Clone & install Python dependencies
 
 ```bash
-git clone <your-team-repository-url>
+git clone https://github.com/Chol-Mach-Kuol/Summative_Urban-Mobility-Data-Explorer.git
 cd Summative_Urban-Mobility-Data-Explorer-1
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
