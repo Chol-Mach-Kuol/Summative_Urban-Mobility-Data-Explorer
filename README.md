@@ -1,6 +1,7 @@
 # NYC Urban Mobility Data Explorer
 
-> 🎥 **Video walkthrough:** https://drive.google.com/file/d/1Qw0GPnzTuSSw6_rMKXbSfdNTWUztbFNl/view?usp=sharing 
+> 🎥 **Video walkthrough:** https://drive.google.com/file/d/1Qw0GPnzTuSSw6_rMKXbSfdNTWUztbFNl/view?usp=sharing
+> Team Participation; https://docs.google.com/spreadsheets/d/1acIL13Cj4XT8lDQXbAEUfrufmdKSQZeacBUqiIU-sl8/edit?gid=0#gid=0
 
 A full-stack dashboard for exploring NYC Yellow Taxi trip patterns — built with Flask, SQLite, and vanilla JS.
 
